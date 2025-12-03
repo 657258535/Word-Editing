@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>在线Word文档查看器</title>
+    <!-- 引入核心库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- 引入富文本编辑库（用于文档编辑） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tinymce/6.8.6/tinymce.min.js"></script>
+    <!-- 引入文件保存库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- 引入HTML转DOCX库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html-docx-js/0.3.1/html-docx.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            font-family: "Microsoft YaHei", sans-serif;
+            background-color: #f5f5f5;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        body {
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            height: calc(100% - 40px); /* 减去body的padding */
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 15px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        
+        .save-btn {
+            padding: 8px 20px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+            display: none; /* 初始隐藏保存按钮 */
+        }
+        
+        .save-btn:hover {
+            background-color: #219653;
+        }
+        
+        .upload-area {
+            padding: 30px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.3s;
+            flex-shrink: 0;
+        }
+        
+        /* 拖入文件时的样式提示 */
+        .upload-area.drag-over {
+            background-color: #f0f7ff;
+            border-color: #3498db;
+        }
+        
+        #fileInput {
+            display: none; /* 隐藏原生文件选择框 */
+        }
+        
+        .upload-btn {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #3498db;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            margin-bottom: 10px;
+        }
+        
+        .upload-btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .upload-tip {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .file-info {
+            margin-top: 15px;
+            color: #333;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .preview-area {
+            padding: 20px;
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* 富文本编辑器容器 - 自适应高度 */
+        #editorContainer {
+            width: 100%;
+            display: none; /* 初始隐藏编辑器 */
+            border: 1px solid #eee;
+            border-radius: 4px;
+            overflow: hidden;
+            flex: 1;
+        }
+        
+        /* 修复编辑器无法输入的关键样式：确保编辑器容器可交互 */
+        .tox-tinymce {
+            border: none !important;
+        }
+        
+        .no-file-tip {
+            color: #999;
+            font-size: 16px;
+            text-align: center;
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .loading-tip {
+            color: #666;
+            font-size: 16px;
+            text-align: center;
+            flex: 1;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        /* 拖入提示框 */
+        .drag-tip {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(52, 152, 219, 0.8);
+            color: white;
+            font-size: 24px;
+            text-align: center;
+            padding-top: 200px;
+            z-index: 9999;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 页面头部 -->
+        <div class="header">
+            在线Word文档查看器
+            <button class="save-btn" id="saveBtn">保存Word文档</button>
+        </div>
+        
+        <!-- 上传区域 -->
+        <div class="upload-area" id="uploadArea">
+            <label for="fileInput" class="upload-btn">选择Word文档</label>
+            <input type="file" id="fileInput" accept=".doc,.docx">
+            <div class="upload-tip">或直接将.doc/.docx文件拖入此区域</div>
+            <div class="file-info" id="fileInfo">未选择文件（支持.doc和.docx格式）</div>
+        </div>
+        
+        <!-- 预览/编辑区域 -->
+        <div class="preview-area">
+            <div class="no-file-tip" id="noFileTip">请上传Word文档进行预览和编辑</div>
+            <div class="loading-tip" id="loadingTip">正在解析文档，请稍候...</div>
+            <div id="editorContainer">
+                <!-- 富文本编辑器将在这里初始化 -->
+                <textarea id="editor"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 拖入文件时的全局提示 -->
+    <div class="drag-tip" id="dragTip">松开鼠标上传文件</div>
+
+    <script>
+        // 获取DOM元素
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const noFileTip = document.getElementById('noFileTip');
+        const loadingTip = document.getElementById('loadingTip');
+        const editorContainer = document.getElementById('editorContainer');
+        const uploadArea = document.getElementById('uploadArea');
+        const dragTip = document.getElementById('dragTip');
+        const saveBtn = document.getElementById('saveBtn');
+        let currentFileName = ''; // 记录当前编辑的文件名
+        let editorInstance = null; // 存储编辑器实例，方便后续操作
+        
+        // 设置编辑器高度的函数
+        function setEditorHeight() {
+            if (editorContainer && editorContainer.style.display !== 'none') {
+                // 获取其他组件的高度
+                const headerHeight = document.querySelector('.header').offsetHeight;
+                const uploadHeight = document.querySelector('.upload-area').offsetHeight;
+                const previewPadding = 40; // preview-area的padding: 20px * 2
+                const editorBorder = 2; // editorContainer的border: 1px * 2
+                
+                // 计算编辑器容器的可用高度
+                const viewportHeight = window.innerHeight;
+                const availableHeight = viewportHeight - 40; // 减去body的padding: 20px * 2
+                const editorContainerHeight = availableHeight - headerHeight - uploadHeight - previewPadding;
+                
+                // 设置编辑器容器的高度
+                editorContainer.style.height = (editorContainerHeight - editorBorder) + 'px';
+            }
+        }
+        
+        // 等待DOM完全加载后再初始化编辑器（修复无法输入的核心）
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化富文本编辑器
+            tinymce.init({
+                selector: '#editor',
+                width: '100%',
+                height: '100%', // 设置高度为100%，让编辑器自动适应父容器
+                plugins: 'advlist autolink lists link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste code help wordcount',
+                toolbar: 'undo redo | formatselect | ' +
+                    'bold italic backcolor | alignleft aligncenter ' +
+                    'alignright alignjustify | bullist numlist outdent indent | ' +
+                    'removeformat | help',
+                menubar: 'file edit view insert format tools table help',
+                content_style: 'body { font-family: "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.6; padding: 10px; }',
+                images_upload_handler: function (blobInfo, success, failure) {
+                    // 处理图片上传（转为base64保存，无需服务器）
+                    const reader = new FileReader();
+                    reader.onload = function () {
+                        success(reader.result);
+                    };
+                    reader.onerror = function () {
+                        failure('图片上传失败');
+                    };
+                    reader.readAsDataURL(blobInfo.blob());
+                },
+                // 编辑器初始化完成后的回调
+                setup: function(editor) {
+                    editorInstance = editor; // 保存编辑器实例
+                    console.log('编辑器初始化完成，可正常输入');
+                    // 编辑器初始化完成后设置高度
+                    setEditorHeight();
+                }
+            });
+            
+            // 监听窗口大小变化，动态调整编辑器高度
+            window.addEventListener('resize', setEditorHeight);
+        });
+        
+        // 1. 普通文件选择上传
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        });
+        
+        // 2. 拖放上传功能
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        // 阻止默认拖放行为
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        // 拖入时样式提示
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, highlight, false);
+            document.body.addEventListener(eventName, showDragTip, false);
+        });
+        
+        // 拖出时恢复样式
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, unhighlight, false);
+            document.body.addEventListener(eventName, hideDragTip, false);
+        });
+        
+        function highlight() {
+            uploadArea.classList.add('drag-over');
+        }
+        
+        function unhighlight() {
+            uploadArea.classList.remove('drag-over');
+        }
+        
+        function showDragTip() {
+            dragTip.style.display = 'block';
+        }
+        
+        function hideDragTip() {
+            dragTip.style.display = 'none';
+        }
+        
+        // 处理拖放文件
+        uploadArea.addEventListener('drop', handleDrop, false);
+        document.body.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const file = dt.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        }
+        
+        // 3. 核心文件处理逻辑
+        async function handleFileUpload(file) {
+            // 验证文件格式
+            const fileType = file.name.split('.').pop().toLowerCase();
+            if (fileType !== 'doc' && fileType !== 'docx') {
+                alert('请选择.doc或.docx格式的Word文档！');
+                fileInput.value = '';
+                return;
+            }
+            
+            // 记录当前文件名（用于保存时使用）
+            currentFileName = file.name;
+            
+            // 更新文件信息
+            fileInfo.textContent = `已选择：${file.name}（大小：${formatFileSize(file.size)}）`;
+            
+            // 显示加载提示，隐藏其他元素
+            noFileTip.style.display = 'none';
+            editorContainer.style.display = 'none';
+            loadingTip.style.display = 'block';
+            saveBtn.style.display = 'none';
+            
+            try {
+                // 读取文件并转换为HTML
+                const arrayBuffer = await readFileAsArrayBuffer(file);
+                const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer }, {
+                    convertImage: mammoth.images.imgElement(function(image) {
+                        return image.read("base64").then(function(base64) {
+                            return `<img src="data:${image.contentType};base64,${base64}" alt="文档图片">`;
+                        });
+                    })
+                });
+                
+                // 隐藏加载提示，显示编辑器
+                loadingTip.style.display = 'none';
+                editorContainer.style.display = 'block';
+                saveBtn.style.display = 'inline-block';
+                
+                // 编辑器显示后设置高度
+                setTimeout(setEditorHeight, 100);
+                
+                // 确保编辑器实例已创建，再填充内容（修复无法输入的关键）
+                if (editorInstance) {
+                    editorInstance.setContent(result.value);
+                    // 延迟激活编辑器，确保编辑器已经完全准备好接收焦点
+                    setTimeout(() => {
+                        try {
+                            editorInstance.focus();
+                        } catch (e) {
+                            console.log('编辑器焦点设置失败，已忽略：', e);
+                        }
+                    }, 100);
+                } else {
+                    // 备用方案：如果实例未找到，延迟重试
+                    setTimeout(() => {
+                        const editor = tinymce.get('editor');
+                        if (editor) {
+                            editor.setContent(result.value);
+                            // 延迟激活编辑器，确保编辑器已经完全准备好接收焦点
+                            setTimeout(() => {
+                                try {
+                                    editor.focus();
+                                } catch (e) {
+                                    console.log('编辑器焦点设置失败，已忽略：', e);
+                                }
+                            }, 100);
+                        }
+                    }, 500);
+                }
+                
+                // 输出转换警告（控制台）
+                if (result.messages.length > 0) {
+                    console.log('文档转换警告：', result.messages);
+                }
+            } catch (error) {
+                // 处理转换失败
+                loadingTip.style.display = 'none';
+                noFileTip.style.display = 'block';
+                noFileTip.textContent = '文档解析失败，请尝试其他文档或刷新页面重试';
+                console.error('转换失败：', error);
+                alert('文档解析失败，请检查文件是否损坏或格式正确');
+            }
+        }
+        
+        // 4. 保存文档功能
+        saveBtn.addEventListener('click', function() {
+            // 确保编辑器实例存在
+            if (!editorInstance && !tinymce.get('editor')) {
+                alert('编辑器未就绪，请稍候再试！');
+                return;
+            }
+            
+            // 获取编辑器中的HTML内容
+            const htmlContent = editorInstance ? editorInstance.getContent() : tinymce.get('editor').getContent();
+            
+            try {
+                // 将HTML转换为Word文档（DOCX格式）
+                const content = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>${currentFileName}</title><style>body { font-family: "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.6; }</style></head><body>${htmlContent}</body></html>`;
+                
+                // 使用html-docx-js将HTML转换为docx文件
+                const docxBlob = htmlDocx.asBlob(content);
+                
+                // 使用FileSaver.js保存文件
+                const docxFileName = currentFileName.replace(/\.html$/, '.docx');
+                saveAs(docxBlob, docxFileName);
+                
+                alert('文档保存成功！已下载为Word格式（.docx），可在Microsoft Word中打开编辑。');
+            } catch (error) {
+                console.error('保存文档失败：', error);
+                alert('保存文档失败，请检查浏览器控制台获取详细信息。');
+            }
+        });
+        
+        // 辅助函数：文件读取为ArrayBuffer
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    resolve(e.target.result);
+                };
+                reader.onerror = function(error) {
+                    reject(error);
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        // 辅助函数：格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+    </script>
+</body>
+</html>
